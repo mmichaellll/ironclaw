@@ -46,6 +46,36 @@ use crate::llm::{
 use crate::tools::tool::{ApprovalRequirement, Tool, ToolError, ToolOutput};
 use crate::tools::{ToolRegistry, prepare_tool_params};
 
+/// Dependency can be either a simple string (e.g. "ureq = \"2\"")
+// or a table/map (e.g. `{ "ureq": { "version": "2" } }`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum DependencyRequirement {
+    Simple(String),
+    Detailed(serde_json::Map<String, serde_json::Value>),
+}
+
+impl DependencyRequirement {
+    pub fn as_string(&self) -> String {
+        match self {
+            Self::Simple(s) => s.clone(),
+            Self::Detailed(map) => {
+                // Serialize to a canonical string for tooling.
+                let mut pairs = Vec::with_capacity(map.len());
+                for (key, value) in map {
+                    let value_repr = if value.is_string() {
+                        format!("\"{}\"", value.as_str().unwrap())
+                    } else {
+                        value.to_string()
+                    };
+                    pairs.push(format!("{} = {}", key, value_repr));
+                }
+                pairs.join(", ")
+            }
+        }
+    }
+}
+
 /// Requirement specification for building software.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildRequirement {
@@ -62,7 +92,7 @@ pub struct BuildRequirement {
     /// Expected output format.
     pub output_spec: Option<String>,
     /// External dependencies needed.
-    pub dependencies: Vec<String>,
+    pub dependencies: Vec<DependencyRequirement>,
     /// Security/capability requirements (for WASM tools).
     pub capabilities: Vec<String>,
 }
@@ -1170,7 +1200,10 @@ mod tests {
             language: Language::Rust,
             input_spec: Some("JSON object with 'query' field".into()),
             output_spec: Some("JSON object with 'result' field".into()),
-            dependencies: vec!["serde".into(), "reqwest".into()],
+            dependencies: vec![
+                DependencyRequirement::Simple("serde".into()),
+                DependencyRequirement::Simple("reqwest".into()),
+            ],
             capabilities: vec!["http".into(), "workspace".into()],
         };
         let json = serde_json::to_string(&req).unwrap();
@@ -1364,6 +1397,34 @@ mod tests {
         assert_eq!(result.tests_passed, 0);
         assert_eq!(result.tests_failed, 0);
         assert!(!result.registered);
+    }
+
+    #[test]
+    fn test_build_requirement_dependencies_string_and_table() {
+        let json = serde_json::json!({
+            "name": "mixed_deps",
+            "description": "Should support both string and table dependencies",
+            "software_type": "wasm_tool",
+            "language": "rust",
+            "input_spec": null,
+            "output_spec": null,
+            "dependencies": [
+                "ureq = \"2\"",
+                { "ureq": { "version": "2" } }
+            ],
+            "capabilities": []
+        });
+
+        let req: BuildRequirement = serde_json::from_value(json).unwrap();
+
+        assert_eq!(req.dependencies.len(), 2);
+        assert!(matches!(req.dependencies[0], DependencyRequirement::Simple(_)));
+        match &req.dependencies[1] {
+            DependencyRequirement::Detailed(map) => {
+                assert!(map.contains_key("ureq"));
+            }
+            _ => panic!("expected detailed dependency map"),
+        }
     }
 
     #[test]
