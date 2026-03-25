@@ -116,6 +116,14 @@ fn read_cargo_manifest(project_dir: &Path) -> Option<CargoManifest> {
     }
 }
 
+/// Capability can be either a simple string or a structured capability object.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum CapabilityRequirement {
+    Simple(String),
+    Detailed(serde_json::Map<String, serde_json::Value>),
+}
+
 /// Requirement specification for building software.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildRequirement {
@@ -134,7 +142,7 @@ pub struct BuildRequirement {
     /// External dependencies needed.
     pub dependencies: Vec<DependencyRequirement>,
     /// Security/capability requirements (for WASM tools).
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<CapabilityRequirement>,
 }
 
 /// Type of software being built.
@@ -155,7 +163,7 @@ pub enum SoftwareType {
 
 /// Programming language for the build.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum Language {
     Rust,
     Python,
@@ -933,6 +941,8 @@ JSON:"#,
         let json_end = response.rfind('}').map(|i| i + 1).unwrap_or(response.len());
         let json_str = &response[json_start..json_end];
 
+        tracing::error!("RAW LLM JSON: {}", json_str);
+
         serde_json::from_str(json_str).map_err(|e| {
             AgentToolError::BuilderFailed(format!("Failed to parse requirement: {}", e))
         })
@@ -1222,8 +1232,8 @@ mod tests {
         let expected_strings = [
             "\"rust\"",
             "\"python\"",
-            "\"type_script\"",
-            "\"java_script\"",
+            "\"typescript\"",
+            "\"javascript\"",
             "\"go\"",
             "\"bash\"",
         ];
@@ -1252,7 +1262,10 @@ mod tests {
                 DependencyRequirement::Simple("serde".into()),
                 DependencyRequirement::Simple("reqwest".into()),
             ],
-            capabilities: vec!["http".into(), "workspace".into()],
+            capabilities: vec![
+                CapabilityRequirement::Simple("http".into()),
+                CapabilityRequirement::Simple("workspace".into()),
+            ],
         };
         let json = serde_json::to_string(&req).unwrap();
         let deserialized: BuildRequirement = serde_json::from_str(&json).unwrap();
