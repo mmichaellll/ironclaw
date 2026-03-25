@@ -29,6 +29,7 @@
 //! - Validates against tool interface
 //! - Registers with ToolRegistry
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -74,6 +75,33 @@ impl DependencyRequirement {
             }
         }
     }
+}
+
+/// Version specifier in Cargo dependencies can be a string or detailed table.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum CargoDependencyVersion {
+    Simple(String),
+    Detailed(CargoDependencyDetail),
+}
+
+/// Detailed Cargo dependency fields (version + extra options).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct CargoDependencyDetail {
+    pub version: Option<String>,
+    #[serde(flatten)]
+    pub extras: HashMap<String, toml::Value>,
+}
+
+/// Cargo.toml manifest guide for dependency parsing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct CargoManifest {
+    #[serde(default)]
+    pub dependencies: HashMap<String, CargoDependencyVersion>,
+    #[serde(rename = "dev-dependencies", default)]
+    pub dev_dependencies: HashMap<String, CargoDependencyVersion>,
+    #[serde(rename = "build-dependencies", default)]
+    pub build_dependencies: HashMap<String, CargoDependencyVersion>,
 }
 
 /// Requirement specification for building software.
@@ -1424,6 +1452,26 @@ mod tests {
                 assert!(map.contains_key("ureq"));
             }
             _ => panic!("expected detailed dependency map"),
+        }
+    }
+
+    #[test]
+    fn test_cargo_manifest_dependencies_untagged() {
+        let toml = r#"
+            [dependencies]
+            ureq = "2"
+            toml = { version = "0.7", features = ["serde"] }
+        "#;
+
+        let manifest: CargoManifest = toml::from_str(toml).unwrap();
+        assert_eq!(manifest.dependencies.len(), 2);
+
+        assert!(matches!(manifest.dependencies["ureq"], CargoDependencyVersion::Simple(_)));
+        if let CargoDependencyVersion::Detailed(detail) = &manifest.dependencies["toml"] {
+            assert_eq!(detail.version.as_deref(), Some("0.7"));
+            assert!(detail.extras.contains_key("features"));
+        } else {
+            panic!("expected detailed dependency map for toml");
         }
     }
 
