@@ -104,6 +104,18 @@ pub struct CargoManifest {
     pub build_dependencies: HashMap<String, CargoDependencyVersion>,
 }
 
+fn read_cargo_manifest(project_dir: &Path) -> Option<CargoManifest> {
+    let path = project_dir.join("Cargo.toml");
+    let text = std::fs::read_to_string(&path).ok()?;
+    match toml::from_str::<CargoManifest>(&text) {
+        Ok(manifest) => Some(manifest),
+        Err(e) => {
+            tracing::warn!(path = %path.display(), err = %e, "Failed to parse Cargo.toml manifest");
+            None
+        }
+    }
+}
+
 /// Requirement specification for building software.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildRequirement {
@@ -713,6 +725,14 @@ Create alongside the .wasm file to grant capabilities:
 
                         // Determine artifact path
                         let artifact_path = self.find_artifact(requirement, project_dir).await;
+
+                        // Parse Cargo.toml into CargoManifest to confirm dependency form handling.
+                        if let Some(manifest) = read_cargo_manifest(project_dir) {
+                            tracing::debug!(
+                                deps = manifest.dependencies.len(),
+                                "Parsed Cargo.toml manifest dependencies"
+                            );
+                        }
 
                         return Ok(BuildResult {
                             build_id,
